@@ -1,0 +1,24 @@
+初始克隆仓库使用
+git clone https://github.com/unjerry/2024shumoPlayground.git
+
+
+查看git仓库当前状态
+git status
+
+
+将临时修改保存到暂存区
+git add ./BasicGitCommand.txt
+
+用暂存区代码覆盖当前修改
+git restore --staged <file>...
+
+创立新的版本-m后面跟的是版本名
+git commit -m "gitCommandEditByzjr"
+
+
+
+向远程仓库推送前需要拉取更新
+git pull --all
+
+推送到远程仓库
+git push
