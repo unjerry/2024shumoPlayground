@@ -5,7 +5,7 @@ import torch.nn as nn
 print(torch.__version__)
 print(torch.cuda.is_available())
 
-rt = 10
+rt = 10.0
 
 th = torch.linspace(0, torch.pi * 2, 100)
 uni = torch.tensor([5.0 * rt, 0.0])
@@ -30,8 +30,11 @@ class M(nn.Module):
         self.P0 = nn.Parameter(p0, requires_grad=False)
         self.P1 = nn.Parameter(p1, requires_grad=False)
         self.dl = nn.Parameter(torch.tensor(dl), requires_grad=False)
-        self.theh = nn.Parameter(torch.tensor([1.0]), requires_grad=True)
-        self.theh2 = nn.Parameter(torch.tensor([-2.0]), requires_grad=True)
+        self.theh = nn.Parameter(torch.tensor([torch.pi / 6]), requires_grad=True)
+        self.theh2 = nn.Parameter(
+            torch.tensor([torch.pi + torch.arcsin(torch.ones([]) / 7.0)]),
+            requires_grad=True,
+        )
         self.unit = nn.Parameter(torch.tensor([1.0, 0]), requires_grad=False)
 
     def forward(self):
@@ -89,16 +92,20 @@ class M(nn.Module):
 
 
 def cost_function(x, y):
+    softplus = torch.nn.Softplus(beta=1000.0 / rt)
     end = torch.tensor([35.0 * rt, 0.0], device="cpu")
     end2 = torch.tensor([-10.0 * rt, 0.0], device="cpu")
     circ = torch.tensor([0.0, 0.0], device="cpu")
     dif = x[-1] - end
     dif2 = y[-1] - end2
     dist = torch.einsum("i,i->", dif, dif)
+    # dist = 0
     dist2 = torch.einsum("i,i->", dif2, dif2)
+    # dist2 = 0
     # print(dist)
     dd = torch.einsum("i,i->", dif, dif)
-    dd2 = torch.einsum("i,i->", dif2, dif2)
+    # dd2 = 0
+    dd2 = 0.01 * torch.einsum("i,i->", dif2, dif2)
     # / (
     #     torch.sqrt(
     #         torch.einsum("i,i->", torch.tensor([5500, 0]), torch.tensor([5500, 0]))
@@ -108,20 +115,47 @@ def cost_function(x, y):
     # ans = 0
     for p in x:
         # print(p)
-        # print(
-        #     torch.exp(
-        #         -5 * (torch.einsum("i,i->", (p - circ) / 500, (p - circ) / 500))
-        #     ).tolist()
-        # )
-        ans += dist * torch.log(1.0 + torch.exp((5.0 * rt - torch.dist(p, circ))))
+        # # print(
+        # #     torch.exp(
+        # #         -5 * (torch.einsum("i,i->", (p - circ) / 500, (p - circ) / 500))
+        # #     ).tolist()
+        # # )
+        ans += (dist2 + dist) * softplus(
+            1.0 + torch.exp((5.0 * rt - torch.dist(p, circ)))
+        )
+
     for p in y:
         # print(p)
-        # print(
-        #     torch.exp(
-        #         -5 * (torch.einsum("i,i->", (p - circ) / 500, (p - circ) / 500))
-        #     ).tolist()
+        # # print(
+        # #     torch.exp(
+        # #         -5 * (torch.einsum("i,i->", (p - circ) / 500, (p - circ) / 500))
+        # #     ).tolist()
+        # # )
+        ans += (dist2 + dist) * softplus(
+            1.0 + torch.exp((5.0 * rt - torch.dist(p, circ)))
+        )
+
+    for i in range(x.shape[0]):
+        # print(i)
+        meet = y[i] - x[i]
+        # print("x: ", meet, " end")
+        norm = torch.torch.tensor([-1 * meet[1], meet[0]], device="cpu")
+        D = torch.einsum("i,i->", norm, x[i]) / torch.dist(norm, circ)
+        # print(torch.dist(norm, circ))
+        # print(dist2.shape, torch.dist(norm, circ)-5.0*rt)
+        # print(dist, dist2, dist + dist2)
+        # ans += (dist + dist2) * (
+        #     softplus((D - 5.0 * rt))
+        #     # - softplus(-5.0 * rt * torch.ones([]))
+        #     # - torch.exp(-5.0 * rt * torch.ones([])) * D
         # )
-        ans += dist2 * torch.log(1.0 + torch.exp((5.0 * rt - torch.dist(p, circ))))
+        ans += (dist + dist2) * (softplus((torch.abs(D) - 5.0 * rt)))
+        ans += (dist + dist2) * softplus(
+            torch.einsum("i,i->", meet, x[i]) / torch.dist(meet, circ)
+        )
+        ans += (dist + dist2) * softplus(
+            torch.einsum("i,i->", meet, -y[i]) / torch.dist(meet, circ)
+        )
 
     return ans
 
@@ -129,7 +163,7 @@ def cost_function(x, y):
 p0 = torch.tensor([[-10.0 * rt, 0.0]], device="cpu")
 p1 = torch.tensor([[35.0 * rt, 0.0]], device="cpu")
 len = 45 * rt
-n = 66
+n = 135
 model = M(n, p0, p1, 0.3 * rt)
 model.to("cpu")
 opt = torch.optim.Adam(model.parameters())
@@ -140,6 +174,7 @@ opt = torch.optim.Adam(model.parameters())
 # plt.gca().set_aspect(1.0)
 # plt.savefig("figs/tmp1.png")
 
+Los = []
 preloss = torch.tensor(0.0)
 for i in range(100000):
     opt.zero_grad()
@@ -151,19 +186,43 @@ for i in range(100000):
     print(
         f"{i}\t{z[0][-1]}\t{loss.tolist():.4f}\t{preloss.tolist():.4f}\t{(torch.abs(preloss-loss)).tolist():.4f}"
     )
-    if torch.abs(preloss - loss).tolist() < 1e-2:
-        break
+    # if torch.abs(preloss - loss).tolist() < 1e-25 * rt:
+    #     z = model()
+    #     plt.gca().set_aspect(1.0)
+    #     plt.xlim((-40 * rt, 40 * rt))
+    #     plt.ylim((-40 * rt, 40 * rt))
+    #     plt.scatter(z[0].detach().cpu()[:, 0], z[0].detach().cpu()[:, 1], s=1)
+    #     # print(z[1])
+    #     plt.scatter(z[1].detach().cpu()[:, 0], z[1].detach().cpu()[:, 1], s=1)
+    #     plt.savefig(f"figs/tmp_{i}.png")
+    #     # plt.show()
+    #     with open("latestparam", "w") as fo:
+    #         for pr in model.parameters():
+    #             # print(pr)
+    #             fo.write(f"{pr}\n")
+    #     break
     preloss = loss
-    if (i + 1) % 1000 == 0:
+    if (i + 1) % 500 == 0 or i == 0:
+        Los.append(loss)
         z = model()
         plt.gca().set_aspect(1.0)
-        plt.xlim((-15 * rt, 40 * rt))
-        plt.ylim((-55 * rt / 2, 55 * rt / 2))
-        plt.scatter(z[0].detach().cpu()[:, 0], z[0].detach().cpu()[:, 1])
+        # plt.xlim((-15 * rt, 40 * rt))
+        # plt.ylim((-55 * rt / 2, 55 * rt / 2))
+        plt.scatter(Pp[:, 0], Pp[:, 1], s=2)
+        plt.scatter(z[0].detach().cpu()[:, 0], z[0].detach().cpu()[:, 1], s=2)
         # print(z[1])
-        plt.scatter(z[1].detach().cpu()[:, 0], z[1].detach().cpu()[:, 1])
-        plt.savefig(f"figs/tmp_{i}.png")
+        plt.scatter(z[1].detach().cpu()[:, 0], z[1].detach().cpu()[:, 1], s=2)
+        plt.savefig(f"figss/tmp_{i}.png")
+        plt.clf()
         # plt.show()
+        with open("latestparam", "w") as fo:
+            for pr in model.parameters():
+                # print(pr)
+                fo.write(f"{pr}\n")
+        torch.save(model.vec, "vec")
+        torch.save(model.vec2, "vec2")
+        torch.save(Los, "Los")
+        torch.save(model, "model")
 
 # z = model().detach().cpu()
 # print(z, z.device, sep="\n")
